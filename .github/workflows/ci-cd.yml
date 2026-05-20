@@ -1,0 +1,22 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-push:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Show Files
+        run: ls
+
+      - name: Pipeline Success
+        run: echo "CI/CD Pipeline Working Successfully"

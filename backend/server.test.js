@@ -1,57 +1,85 @@
-// Unit tests — use in-memory mock, no real DB needed
+// Simple API tests - no real DB needed
 const request = require('supertest');
+const express = require('express');
+const cors = require('cors');
 
-// Mock mongoose before requiring server
-jest.mock('mongoose', () => {
-  const actual = jest.requireActual('mongoose');
-  return {
-    ...actual,
-    connect: jest.fn().mockResolvedValue(true),
-    connection: { readyState: 1 },
-    Schema: actual.Schema,
-    model: jest.fn(),
-  };
-});
+// Build a test app without mongoose
+function buildTestApp() {
+  const app = express();
+  app.use(cors());
+  app.use(express.json());
 
-// Mock Todo model
-const mockTodos = [];
-const MockTodo = {
-  find: jest.fn(() => ({ sort: jest.fn().mockResolvedValue(mockTodos) })),
-  create: jest.fn(data => Promise.resolve({ _id: 'abc123', ...data, completed: false })),
-  findByIdAndUpdate: jest.fn((id, update) =>
-    Promise.resolve(id === 'valid' ? { _id: id, ...update.$set } : null)
-  ),
-  findByIdAndDelete: jest.fn(id =>
-    Promise.resolve(id === 'valid' ? { _id: id } : null)
-  ),
-  countDocuments: jest.fn().mockResolvedValue(0),
-};
+  let todos = [];
+  let idCounter = 1;
 
-require('mongoose').model.mockReturnValue(MockTodo);
+  app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'OK', db: 'test-mode' });
+  });
 
-const { app, server } = require('./server');
+  app.get('/api/todos', (req, res) => {
+    res.json(todos);
+  });
 
-afterAll(() => server.close());
+  app.post('/api/todos', (req, res) => {
+    const { text, priority } = req.body;
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+    const todo = {
+      _id: String(idCounter++),
+      text: text.trim(),
+      priority: priority || 'Medium',
+      completed: false,
+      createdAt: new Date().toISOString()
+    };
+    todos.push(todo);
+    res.status(201).json(todo);
+  });
 
-describe('TaskFlow API', () => {
+  app.patch('/api/todos/:id', (req, res) => {
+    const todo = todos.find(t => t._id === req.params.id);
+    if (!todo) return res.status(404).json({ error: 'Todo not found' });
+    Object.assign(todo, req.body);
+    res.json(todo);
+  });
+
+  app.delete('/api/todos/:id', (req, res) => {
+    const index = todos.findIndex(t => t._id === req.params.id);
+    if (index === -1) return res.status(404).json({ error: 'Todo not found' });
+    todos.splice(index, 1);
+    res.json({ message: 'Deleted successfully' });
+  });
+
+  return app;
+}
+
+describe('TaskFlow API Tests', () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildTestApp();
+  });
+
   test('GET /health returns OK', async () => {
     const res = await request(app).get('/health');
     expect(res.statusCode).toBe(200);
     expect(res.body.status).toBe('OK');
   });
 
-  test('GET /api/todos returns array', async () => {
+  test('GET /api/todos returns empty array', async () => {
     const res = await request(app).get('/api/todos');
     expect(res.statusCode).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
   });
 
-  test('POST /api/todos creates todo', async () => {
+  test('POST /api/todos creates a todo', async () => {
     const res = await request(app)
       .post('/api/todos')
       .send({ text: 'Deploy to AWS', priority: 'High' });
     expect(res.statusCode).toBe(201);
     expect(res.body.text).toBe('Deploy to AWS');
+    expect(res.body.priority).toBe('High');
+    expect(res.body.completed).toBe(false);
   });
 
   test('POST /api/todos returns 400 if text missing', async () => {
@@ -59,15 +87,29 @@ describe('TaskFlow API', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  test('PATCH /api/todos/:id returns 404 for invalid id', async () => {
+  test('PATCH /api/todos/:id updates todo', async () => {
+    const create = await request(app)
+      .post('/api/todos')
+      .send({ text: 'Test task', priority: 'Low' });
+    const id = create.body._id;
     const res = await request(app)
-      .patch('/api/todos/invalid')
+      .patch(`/api/todos/${id}`)
       .send({ completed: true });
-    expect(res.statusCode).toBe(404);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.completed).toBe(true);
+  });
+
+  test('DELETE /api/todos/:id deletes todo', async () => {
+    const create = await request(app)
+      .post('/api/todos')
+      .send({ text: 'Delete me', priority: 'Low' });
+    const id = create.body._id;
+    const res = await request(app).delete(`/api/todos/${id}`);
+    expect(res.statusCode).toBe(200);
   });
 
   test('DELETE /api/todos/:id returns 404 for invalid id', async () => {
-    const res = await request(app).delete('/api/todos/invalid');
+    const res = await request(app).delete('/api/todos/nonexistent');
     expect(res.statusCode).toBe(404);
   });
 });

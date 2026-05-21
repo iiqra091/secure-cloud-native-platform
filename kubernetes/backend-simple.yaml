@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskflow-backend
+  namespace: taskflow
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: taskflow-backend
+  template:
+    metadata:
+      labels:
+        app: taskflow-backend
+    spec:
+      containers:
+        - name: backend
+          image: node:20-alpine
+          command: ["sh", "-c"]
+          args:
+            - |
+              mkdir -p /app && cd /app
+              npm init -y
+              npm install express cors mongoose
+              cat > server.js << 'JSEOF'
+              const express = require('express');
+              const cors = require('cors');
+              const mongoose = require('mongoose');
+              const app = express();
+              app.use(cors());
+              app.use(express.json());
+              const uri = process.env.MONGO_URI || '';
+              mongoose.connect(uri)
+                .then(() => console.log('MongoDB connected'))
+                .catch(e => console.log('MongoDB error:', e.message));
+              app.get('/health', (req, res) => {
+                res.json({
+                  status: 'OK',
+                  app: 'TaskFlow Backend',
+                  db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+                });
+              });
+              app.get('/api/todos', (req, res) => res.json([]));
+              app.listen(5000, () => console.log('TaskFlow Backend running on port 5000'));
+              JSEOF
+              node server.js
+          ports:
+            - containerPort: 5000
+          env:
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: MONGO_URI
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: taskflow-backend-svc
+  namespace: taskflow
+spec:
+  selector:
+    app: taskflow-backend
+  type: NodePort
+  ports:
+    - port: 5000
+      targetPort: 5000
+      nodePort: 30500

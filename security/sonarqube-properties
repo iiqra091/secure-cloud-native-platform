@@ -1,0 +1,21 @@
+# Module 8: SonarQube — Static Code Analysis Configuration
+# Place this file as sonar-project.properties in project root
+
+sonar.projectKey=student-management-system
+sonar.projectName=Student Management System - DevOps Final Lab
+sonar.projectVersion=1.0
+
+# Source directories
+sonar.sources=backend,frontend
+sonar.exclusions=**/node_modules/**,**/coverage/**,**/*.test.js
+
+# Language
+sonar.language=js
+sonar.javascript.lcov.reportPaths=backend/coverage/lcov.info
+
+# SonarQube server (set via environment or CI secrets)
+# sonar.host.url=http://your-sonarqube-server:9000
+# sonar.login=your-sonarqube-token
+
+# Quality gate — fail build if issues found
+sonar.qualitygate.wait=true

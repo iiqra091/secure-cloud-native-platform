@@ -1,0 +1,38 @@
+# Module 7: Alertmanager Configuration
+# Sends alerts via email when Prometheus fires an alert
+
+global:
+  smtp_smarthost: "smtp.gmail.com:587"
+  smtp_from: "alerts@yourdomain.com"
+  smtp_auth_username: "your-email@gmail.com"
+  smtp_auth_password: "your-app-password"
+
+route:
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+  receiver: "email-alerts"
+  routes:
+    - match:
+        severity: critical
+      receiver: "email-alerts"
+
+receivers:
+  - name: "email-alerts"
+    email_configs:
+      - to: "devops-team@yourdomain.com"
+        subject: "[ALERT] {{ .GroupLabels.alertname }}"
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          {{ end }}
+
+inhibit_rules:
+  - source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal: ["alertname"]

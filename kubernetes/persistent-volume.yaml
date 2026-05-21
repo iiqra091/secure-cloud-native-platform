@@ -1,0 +1,28 @@
+# Module 4: Persistent Volume for database storage
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: student-db-pv
+  namespace: student-app
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: standard
+  hostPath:
+    path: /data/student-db
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: student-db-pvc
+  namespace: student-app
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard

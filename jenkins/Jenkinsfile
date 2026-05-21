@@ -1,0 +1,138 @@
+// Module 2 & 6: Jenkins CI/CD Pipeline
+// Complete pipeline: Checkout → Build → Test → Security Scan → Docker → Deploy
+
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_HUB_CREDENTIALS = credentials('docker-hub-credentials')
+        BACKEND_IMAGE  = "${DOCKER_HUB_CREDENTIALS_USR}/student-backend"
+        FRONTEND_IMAGE = "${DOCKER_HUB_CREDENTIALS_USR}/student-frontend"
+        IMAGE_TAG      = "${BUILD_NUMBER}"
+        SONAR_TOKEN    = credentials('sonar-token')
+    }
+
+    stages {
+
+        // Stage 1: Pull code from Git
+        stage('Checkout') {
+            steps {
+                echo '=== Stage 1: Pulling code from Git ==='
+                checkout scm
+            }
+        }
+
+        // Stage 2: Install dependencies
+        stage('Install Dependencies') {
+            steps {
+                echo '=== Stage 2: Installing dependencies ==='
+                dir('backend') {
+                    sh 'npm install'
+                }
+            }
+        }
+
+        // Stage 3: Run unit tests
+        stage('Unit Tests') {
+            steps {
+                echo '=== Stage 3: Running unit tests ==='
+                dir('backend') {
+                    sh 'npm test'
+                }
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'backend/junit.xml'
+                }
+            }
+        }
+
+        // Stage 4: Code quality check (SonarQube)
+        stage('Code Quality - SonarQube') {
+            steps {
+                echo '=== Stage 4: Running SonarQube analysis ==='
+                withSonarQubeEnv('SonarQube') {
+                    sh '''
+                        npx sonar-scanner \
+                          -Dsonar.projectKey=student-management-system \
+                          -Dsonar.sources=backend,frontend \
+                          -Dsonar.login=${SONAR_TOKEN}
+                    '''
+                }
+            }
+        }
+
+        // Stage 5: Security scan (Trivy filesystem)
+        stage('Security Scan - Trivy FS') {
+            steps {
+                echo '=== Stage 5: Running Trivy filesystem scan ==='
+                sh 'trivy fs . --severity HIGH,CRITICAL --format table --output trivy-fs-report.txt || true'
+                archiveArtifacts artifacts: 'trivy-fs-report.txt', allowEmptyArchive: true
+            }
+        }
+
+        // Stage 6: Build Docker images
+        stage('Docker Build') {
+            steps {
+                echo '=== Stage 6: Building Docker images ==='
+                sh "docker build -t ${BACKEND_IMAGE}:${IMAGE_TAG} ./backend"
+                sh "docker build -t ${FRONTEND_IMAGE}:${IMAGE_TAG} ./frontend"
+            }
+        }
+
+        // Stage 7: Scan Docker images
+        stage('Security Scan - Docker Images') {
+            steps {
+                echo '=== Stage 7: Scanning Docker images with Trivy ==='
+                sh "trivy image --severity HIGH,CRITICAL ${BACKEND_IMAGE}:${IMAGE_TAG} --output trivy-image-report.txt || true"
+                archiveArtifacts artifacts: 'trivy-image-report.txt', allowEmptyArchive: true
+            }
+        }
+
+        // Stage 8: Push to Docker Hub
+        stage('Push to Registry') {
+            steps {
+                echo '=== Stage 8: Pushing images to Docker Hub ==='
+                sh "echo ${DOCKER_HUB_CREDENTIALS_PSW} | docker login -u ${DOCKER_HUB_CREDENTIALS_USR} --password-stdin"
+                sh "docker push ${BACKEND_IMAGE}:${IMAGE_TAG}"
+                sh "docker push ${FRONTEND_IMAGE}:${IMAGE_TAG}"
+                sh "docker tag ${BACKEND_IMAGE}:${IMAGE_TAG} ${BACKEND_IMAGE}:latest"
+                sh "docker tag ${FRONTEND_IMAGE}:${IMAGE_TAG} ${FRONTEND_IMAGE}:latest"
+                sh "docker push ${BACKEND_IMAGE}:latest"
+                sh "docker push ${FRONTEND_IMAGE}:latest"
+            }
+        }
+
+        // Stage 9: Deploy to Kubernetes
+        stage('Kubernetes Deploy') {
+            steps {
+                echo '=== Stage 9: Deploying to Kubernetes ==='
+                sh """
+                    sed -i 's|IMAGE_TAG|${IMAGE_TAG}|g' kubernetes/backend-deployment.yaml
+                    sed -i 's|IMAGE_TAG|${IMAGE_TAG}|g' kubernetes/frontend-deployment.yaml
+                    kubectl apply -f kubernetes/namespace.yaml
+                    kubectl apply -f kubernetes/configmap.yaml
+                    kubectl apply -f kubernetes/backend-deployment.yaml
+                    kubectl apply -f kubernetes/frontend-deployment.yaml
+                    kubectl apply -f kubernetes/ingress.yaml
+                    kubectl rollout status deployment/backend -n student-app
+                    kubectl rollout status deployment/frontend -n student-app
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Pipeline completed successfully! Monitoring dashboards will update automatically.'
+        }
+        failure {
+            echo '❌ Pipeline failed! Check logs and alerts.'
+            // emailext to: 'devops-team@yourdomain.com', subject: "Build FAILED: ${JOB_NAME} #${BUILD_NUMBER}", body: "Check Jenkins: ${BUILD_URL}"
+        }
+        always {
+            sh 'docker logout || true'
+            cleanWs()
+        }
+    }
+}

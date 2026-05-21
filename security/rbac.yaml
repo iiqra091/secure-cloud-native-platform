@@ -1,0 +1,67 @@
+# Module 8: DevSecOps — Kubernetes RBAC (Role-Based Access Control)
+# Implements least privilege access (security best practice)
+
+# ServiceAccount for the application
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: student-app-sa
+  namespace: student-app
+---
+# Role: limited permissions for the app
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: student-app-role
+  namespace: student-app
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+---
+# RoleBinding: bind role to service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: student-app-rolebinding
+  namespace: student-app
+subjects:
+  - kind: ServiceAccount
+    name: student-app-sa
+    namespace: student-app
+roleRef:
+  kind: Role
+  apiGroupName: rbac.authorization.k8s.io
+  name: student-app-role
+---
+# NetworkPolicy: restrict pod-to-pod communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: student-app-netpol
+  namespace: student-app
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+      ports:
+        - protocol: TCP
+          port: 5000
+  egress:
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
